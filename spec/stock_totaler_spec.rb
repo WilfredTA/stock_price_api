@@ -1,33 +1,35 @@
 require_relative '../totaler'
 require 'webmock/rspec'
+require 'vcr'
 
-RSpec.describe "stock totaler" do
-  let(:tesla_data) do
-    <<~JSON
-    	{
-    	  "Status":"SUCCESS",
-    	  "Name":"Tesla Inc",
-    	  "Symbol":"TSLA",
-    	  "LastPrice":325.2,
-     	  "Change":-6.46000000000004,
-    	  "ChangePercent":-1.94777784478081,
-    	  "Timestamp":"Fri Dec 22 00:00:00 UTC-05:00 2017",
-    	  "MSDate":43091,
-    	  "MarketCap":54655388400,
-    	  "Volume":4215807,
-    	  "ChangeYTD":213.69,
-    	  "ChangePercentYTD":52.1830689316299,
-    	  "High":330.9214,
-    	  "Low":324.82,
-    	  "Open":329.51
-    	}
-    	 JSON
+VCR.configure do |c|
+  c.cassette_library_dir = 'spec/cassettes'
+  c.hook_into :webmock
+  c.configure_rspec_metadata!
+  c.allow_http_connections_when_no_cassette = true
 end
 
-  it "calculates stock share value" do
-    url= "http://dev.markitondemand.com/MODApis/Api/v2/Quote/json?symbol=TSLA"
-    stub_request(:get, url).to_return(body: tesla_data)
+RSpec.describe "stock totaler" do
+
+  # Make sure your program follows the happy path when given expected input
+  it "calculates stock share value", :vcr do
     total_value = calculate_value("TSLA", 1)
     expect(total_value).to eq(325.2)
+  end
+
+  # Make sure your program handles invalid input
+  it "handles an invalid stock symbol", :vcr do
+    expect {calculate_value("ZZZZ", 1)}.to raise_error(SymbolNotFound, /No Symbol Matches/)
+  end
+
+  # Make sure your program handles request errors well, because connections cannot be trusted
+  # We don't use VCR here because we don't care about the contents of the response, we only care about
+  # timeout of the response... Any time you would need to expect a particular response from the external API
+  # is a time when you would use VCR. But here, we are trying to make our HTTP library raise a connection error,
+  # therefore we need to simulate a connection to an API then make it timeout
+  it "handles an exception from Faraday" do
+    stub_request(:get, "http://dev.markitondemand.com/MODApis/Api/v2/Quote/json?symbol=ZZZZ").to_timeout
+
+    expect {calculate_value("ZZZZ", 1)}.to raise_error(RequestFailed)
   end
 end
